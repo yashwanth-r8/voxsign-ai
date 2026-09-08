@@ -114,6 +114,22 @@ async function initModel(){
   }
 }
 
+async function stopCamera(){
+  if(rafId) cancelAnimationFrame(rafId);
+  rafId=null;
+  if(stream){ stream.getTracks().forEach(track=>track.stop()); stream=null; }
+  video.srcObject=null;
+  latestLandmarks=null;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  overlay.classList.remove("hidden");
+  cameraStatus.textContent="Camera off";
+  $("startCamera").textContent="▶ Start Camera";
+  $("startCamera").disabled=false;
+  $("stopCamera").disabled=true;
+  $("recognizedText").textContent="—";
+  $("recognitionHint").textContent="Camera is off.";
+}
+
 async function startCamera(){
   if(stream) return;
   try{
@@ -121,6 +137,9 @@ async function startCamera(){
     video.srcObject=stream; await video.play();
     overlay.classList.add("hidden"); cameraStatus.textContent="Camera live";
     $("startCamera").textContent="Camera Running";
+    $("startCamera").disabled=true;
+    $("stopCamera").disabled=false;
+    $("recognitionHint").textContent=samples.length ? "Show a trained sign to the camera." : "Train at least one sign below.";
     predict();
   }catch(e){
     alert("Camera access failed. Use HTTPS or localhost and allow camera permission.");
@@ -225,6 +244,7 @@ function createAction(){
 }
 
 $("startCamera").onclick=startCamera;
+$("stopCamera").onclick=stopCamera;
 $("speakRecognized").onclick=()=>speak($("recognizedText").textContent==="—"?"":$("recognizedText").textContent);
 $("listenButton").onclick=toggleListening;
 $("clearConversation").onclick=()=>{conversation=[];saveAll();renderConversation()};
@@ -234,6 +254,6 @@ $("closeTraining").onclick=()=>$("trainingPanel").classList.add("hidden");
 $("recordSign").onclick=startRecording;
 $("saveSign").onclick=saveSample;
 window.addEventListener("resize",()=>{if(video.videoWidth){canvas.width=video.videoWidth;canvas.height=video.videoHeight}});
-window.addEventListener("beforeunload",()=>{if(stream)stream.getTracks().forEach(t=>t.stop());if(rafId)cancelAnimationFrame(rafId)});
+window.addEventListener("beforeunload",()=>{stopCamera()});
 
 renderConversation();renderTasks();renderTrained();setupSpeech();initModel();
