@@ -7,17 +7,35 @@
   <title>VoxSign AI — Communication Copilot</title>
   <link rel="manifest" href="manifest.json">
   <link rel="stylesheet" href="styles.css">
+  <script type="importmap">{"imports":{"@mediapipe/tasks-vision":"https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22-rc.20250304/+esm"}}</script>
 </head>
 <body>
-  <div class="app">
-    <header class="topbar">
-      <div>
-        <div class="brand">VoxSign <span>AI</span></div>
-        <div class="tagline">Communication Copilot</div>
-      </div>
-      <div id="modelStatus" class="status-pill">AI loading…</div>
-    </header>
+  <div class="login-screen" id="loginScreen">
+    <div class="login-card">
+      <div class="brand login-brand">VoxSign <span>AI</span></div>
+      <div class="tagline">Communication Copilot</div>
+      <h1>Welcome to VoxSign AI</h1>
+      <p>Sign in to save your profile, trained signs and conversation preferences on this device.</p>
+      <button id="googleLogin" class="google-btn"><span class="google-g">G</span> Continue with Google / Gmail</button>
+      <div class="login-divider"><span>Prototype sign in</span></div>
+      <input id="loginName" class="login-input" placeholder="Your name">
+      <input id="loginEmail" class="login-input" type="email" placeholder="Gmail address">
+      <button id="prototypeLogin" class="primary full">Continue</button>
+      <small class="login-note">For the prototype, Google OAuth is UI-ready but requires your own Google OAuth Client ID for real account authentication.</small>
+    </div>
+  </div>
 
+  <div class="app hidden" id="app">
+    <header class="topbar">
+      <div><div class="brand">VoxSign <span>AI</span></div><div class="tagline">Communication Copilot</div></div>
+      <div class="top-actions">
+        <button id="topHome" class="top-nav-btn" title="Go to Home">⌂ <span>Home</span></button>
+        <div id="modelStatus" class="status-pill">AI detector ready</div>
+        <button id="topProfile" class="top-nav-btn" title="Open Profile">👤 <span>Profile</span></button>
+        <button id="topSettings" class="top-nav-btn" title="Open Settings">⚙️ <span>Settings</span></button>
+        <button id="logout" class="ghost">Sign out</button>
+      </div>
+    </header>
     <main>
       <section class="hero">
         <div>
@@ -30,95 +48,97 @@
 
       <section class="workspace">
         <div class="camera-card card">
-          <div class="card-head">
-            <div>
-              <h2>Sign → Speech</h2>
-              <p>Show a trained sign to the camera.</p>
-            </div>
-            <span id="cameraStatus" class="mini-status">Camera off</span>
-          </div>
+          <div class="card-head"><div><h2>Sign → Speech</h2><p>Use the camera for live hand-sign detection using the signs you trained.</p></div><span id="cameraStatus" class="mini-status">Camera off</span></div>
           <div class="video-wrap">
-            <video id="video" playsinline muted></video>
-            <canvas id="landmarks"></canvas>
-            <div id="cameraOverlay" class="camera-overlay">
-              <div class="camera-icon">⌾</div>
-              <strong>Camera ready</strong>
-              <span>Tap Start Camera</span>
-            </div>
+            <video id="video" playsinline muted></video><canvas id="landmarks"></canvas>
+            <div id="cameraOverlay" class="camera-overlay"><div class="camera-icon">⌾</div><strong>Camera ready</strong><span>Tap Start Camera</span></div>
           </div>
           <div class="recognition">
-            <div class="recognition-label">Recognized sign</div>
+            <div class="recognition-label">Sign Detector</div>
+            <div class="detector-panel"><div><div class="detector-title" id="detectorState">Detector idle</div><div id="detectorValue" class="detector-value">No sign detected</div><div id="detectorConfidence" class="detector-confidence">Start Camera to activate the live detector.</div></div><span id="detectorDot" class="detector-dot"></span></div>
+            <div class="recognition-label" style="margin-top:14px">Selected sign / message</div>
             <div id="recognizedText" class="recognized">—</div>
-            <div id="recognitionHint" class="hint">Train at least one sign below.</div>
+            <div id="recognitionHint" class="hint">Start the camera, then show a sign you trained. VoxSign matches it against your saved samples.</div>
             <button id="speakRecognized" class="secondary">🔊 Speak</button>
           </div>
         </div>
 
         <div class="conversation-card card">
-          <div class="card-head">
-            <div>
-              <h2>Conversation</h2>
-              <p>Keep both sides visible.</p>
+          <div class="card-head"><div><h2>Conversation</h2><p>Translate messages, convert them to Morse, or speak them.</p></div><button id="clearConversation" class="ghost">Clear</button></div>
+          <div id="conversation" class="conversation"><div class="empty-state">Your conversation will appear here.</div></div>
+          <div class="translator-box">
+            <div class="translator-head"><strong>🌐 Translate Conversation</strong><span id="translateStatus" class="hint">Choose a language and translate the latest message.</span></div>
+            <div class="translator-controls">
+              <select id="languageSelect" class="language-select" aria-label="Target language"></select>
+              <button id="translateLatest" class="secondary">Translate Latest</button>
             </div>
-            <button id="clearConversation" class="ghost">Clear</button>
+            <div id="translationResult" class="translation-result">Translation will appear here.</div>
           </div>
-          <div id="conversation" class="conversation">
-            <div class="empty-state">Your conversation will appear here.</div>
-          </div>
-          <div class="speech-controls">
-            <button id="listenButton" class="primary full">🎤 Start Listening</button>
-            <div id="speechStatus" class="hint">Speech recognition may use a network service in some browsers.</div>
-          </div>
+          <div class="speech-controls"><button id="listenButton" class="primary full">🎤 Start Listening</button><div id="speechStatus" class="hint">Speech recognition may use a network service in some browsers.</div></div>
         </div>
       </section>
 
       <section class="quick-actions">
-        <button id="addTask" class="action-card">
-          <span>⚡</span><div><strong>Create Action</strong><small>Turn the latest message into a task/reminder</small></div>
-        </button>
-        <button id="openTraining" class="action-card">
-          <span>✋</span><div><strong>Train a Sign</strong><small>Teach VoxSign your team's demo vocabulary</small></div>
-        </button>
+        <button id="openTrain" class="action-card"><span>✋</span><div><strong>Train a Sign</strong><small>Teach VoxSign your own hand sign with camera samples</small></div></button>
+        <button id="profileButton" class="action-card"><span>👤</span><div><strong>Profile</strong><small id="profileSummary">Manage your account details</small></div></button>
+        <button id="settingsButton" class="action-card"><span>⚙️</span><div><strong>Settings</strong><small>Themes, language and app preferences</small></div></button>
       </section>
 
-      <section class="tasks card">
-        <div class="card-head">
-          <div><h2>Actions & Reminders</h2><p>Simple productivity layer for the demo.</p></div>
-        </div>
-        <div id="tasksList" class="tasks-list">
-          <div class="empty-state">No actions yet.</div>
-        </div>
-      </section>
-
-      <section id="trainingPanel" class="card training hidden">
-        <div class="card-head">
-          <div>
-            <h2>Train a Sign</h2>
-            <p>Record about 1.5 seconds of the same sign. Repeat 3–5 times for a reliable demo.</p>
+      <section id="trainPanel" class="card training page-panel hidden">
+        <div class="card-head"><div><h2>Train a Sign</h2><p>Teach VoxSign a sign using the live camera. Record the same sign 3–5 times for a stronger demo.</p></div><button id="closeTrain" class="ghost">← Home</button></div>
+        <div class="training-camera-wrap">
+          <div class="training-video-wrap">
+            <video id="trainVideo" playsinline muted></video><canvas id="trainLandmarks"></canvas>
+            <div id="trainCameraOverlay" class="camera-overlay"><div class="camera-icon">⌾</div><strong>Training camera ready</strong><span>Tap Start Training Camera</span></div>
           </div>
-          <button id="closeTraining" class="ghost">Close</button>
+          <div class="training-camera-controls"><button id="startTrainCamera" class="primary">▶ Start Training Camera</button><button id="stopTrainCamera" class="secondary" disabled>■ Stop Camera</button><span id="trainCameraStatus" class="mini-status">Camera off</span></div>
         </div>
         <div class="training-grid">
-          <label>Sign name
-            <input id="signName" placeholder="e.g. HELP">
-          </label>
-          <div class="train-buttons">
-            <button id="recordSign" class="primary">● Record Sign</button>
-            <button id="saveSign" class="secondary" disabled>Save Sample</button>
-          </div>
+          <label class="field-label">Sign name<input id="trainName" class="text-input" placeholder="Example: HELLO"></label>
+          <div class="train-buttons"><button id="recordSign" class="primary" disabled>● Record Sign</button><button id="saveSign" class="secondary" disabled>Save Sample</button></div>
         </div>
         <div class="training-meter"><div id="trainingProgress"></div></div>
-        <div id="trainingStatus" class="hint">Start the camera, enter a sign name, then record.</div>
-        <div id="trainedSigns" class="chips"></div>
+        <div id="trainingStatus" class="hint">Start the camera, enter a sign name, then record for about 1.5 seconds.</div>
+        <div class="training-sample-box"><div class="sample-head"><strong>Camera training samples</strong><span id="sampleCount" class="hint">0 samples</span></div><div id="trainingSamples" class="sample-strip"></div></div>
+        <div class="saved-training"><div class="preview-title">Saved Trained Signs</div><div id="savedTrainingGrid" class="saved-training-grid"></div></div>
+      </section>
+
+      <section id="themePanel" class="card training page-panel hidden">
+        <div class="card-head"><div><h2>Choose Theme</h2><p>Your selection is saved on this device.</p></div><button id="closeThemes" class="ghost">← Home</button></div>
+        <div class="theme-grid">
+          <button class="theme-option" data-theme="indigo"><span class="theme-swatch indigo"></span><strong>Indigo</strong><small>Default dark blue</small></button>
+          <button class="theme-option" data-theme="ocean"><span class="theme-swatch ocean"></span><strong>Ocean</strong><small>Cool cyan</small></button>
+          <button class="theme-option" data-theme="emerald"><span class="theme-swatch emerald"></span><strong>Emerald</strong><small>Fresh green</small></button>
+          <button class="theme-option" data-theme="sunset"><span class="theme-swatch sunset"></span><strong>Sunset</strong><small>Warm orange</small></button>
+          <button class="theme-option" data-theme="midnight"><span class="theme-swatch midnight"></span><strong>Midnight</strong><small>Deep violet</small></button>
+        </div>
+      </section>
+
+      <section id="settingsPanel" class="card training page-panel hidden">
+        <div class="card-head"><div><h2>Settings</h2><p>Customize VoxSign AI without changing your saved conversation.</p></div><button id="closeSettings" class="ghost">← Home</button></div>
+        <div class="settings-grid">
+          <div class="settings-section"><h3>🎨 Theme</h3><p>Choose one of the five interface themes.</p><div class="theme-grid">
+            <button class="theme-option" data-theme="indigo"><span class="theme-swatch indigo"></span><strong>Indigo</strong><small>Default dark blue</small></button>
+            <button class="theme-option" data-theme="ocean"><span class="theme-swatch ocean"></span><strong>Ocean</strong><small>Cool cyan</small></button>
+            <button class="theme-option" data-theme="emerald"><span class="theme-swatch emerald"></span><strong>Emerald</strong><small>Fresh green</small></button>
+            <button class="theme-option" data-theme="sunset"><span class="theme-swatch sunset"></span><strong>Sunset</strong><small>Warm orange</small></button>
+            <button class="theme-option" data-theme="midnight"><span class="theme-swatch midnight"></span><strong>Midnight</strong><small>Deep violet</small></button>
+          </div></div>
+          <div class="settings-section"><h3>🌐 App Language</h3><p>Set the language used for translation and your preferred app language.</p><select id="settingsLanguage" class="language-select settings-language"></select></div>
+        </div>
+      </section>
+
+      <section id="profilePanel" class="card training page-panel hidden">
+        <div class="card-head"><div><h2>Profile</h2><p>Update the profile used by this prototype.</p></div><button id="closeProfile" class="ghost">← Home</button></div>
+        <div class="profile-grid">
+          <label class="field-label">Name<input id="profileName" class="text-input"></label>
+          <label class="field-label">Gmail<input id="profileEmail" class="text-input" type="email"></label>
+        </div>
+        <button id="saveProfile" class="primary">Save Profile</button>
       </section>
     </main>
-
-    <footer>
-      <span>VoxSign AI prototype</span>
-      <span>Early demo — not a certified accessibility or medical device.</span>
-    </footer>
+    <footer><span>VoxSign AI prototype</span><span>Early demo — not a certified accessibility or medical device.</span></footer>
   </div>
-
   <script type="module" src="app.js"></script>
 </body>
 </html>

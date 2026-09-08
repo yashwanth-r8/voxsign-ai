@@ -1,262 +1,45 @@
-import { HandLandmarker, FilesetResolver, DrawingUtils } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22-rc.20250304/+esm";
-
-const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
-const WASM_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22-rc.20250304/wasm";
-
-const $ = id => document.getElementById(id);
-const video = $("video"), canvas = $("landmarks"), ctx = canvas.getContext("2d");
-const statusEl = $("modelStatus"), cameraStatus = $("cameraStatus"), overlay = $("cameraOverlay");
-let handLandmarker, stream, rafId, lastVideoTime = -1, latestLandmarks = null;
-let recording = false, recordingFrames = [], recordStarted = 0, pendingSample = null;
-let lastRecognized = "", lastRecognizedAt = 0, recognitionStableCount = 0;
-let samples = JSON.parse(localStorage.getItem("voxsign-samples") || "[]");
-let conversation = JSON.parse(localStorage.getItem("voxsign-conversation") || "[]");
-let tasks = JSON.parse(localStorage.getItem("voxsign-tasks") || "[]");
-let recognition = null, listening = false;
-
-function saveAll(){
-  localStorage.setItem("voxsign-samples", JSON.stringify(samples));
-  localStorage.setItem("voxsign-conversation", JSON.stringify(conversation));
-  localStorage.setItem("voxsign-tasks", JSON.stringify(tasks));
-}
-
-function normalizeLandmarks(lm){
-  if(!lm || lm.length < 21) return null;
-  const wrist = lm[0];
-  const pts = lm.map(p => ({x:p.x-wrist.x,y:p.y-wrist.y,z:p.z-wrist.z}));
-  let scale = 0;
-  for(const p of pts) scale = Math.max(scale, Math.hypot(p.x,p.y,p.z));
-  scale = scale || 1;
-  return pts.flatMap(p => [p.x/scale,p.y/scale,p.z/scale]);
-}
-
-function distance(a,b){
-  if(!a || !b || a.length !== b.length) return Infinity;
-  let s=0; for(let i=0;i<a.length;i++){const d=a[i]-b[i];s+=d*d}
-  return Math.sqrt(s/a.length);
-}
-
-function clipDistance(a,b){
-  if(!a?.length || !b?.length) return Infinity;
-  const n=Math.min(a.length,b.length);
-  let total=0;
-  for(let i=0;i<n;i++) total += distance(a[i],b[i]);
-  return total/n;
-}
-
-function classify(){
-  if(!latestLandmarks || !samples.length) return null;
-  const current = normalizeLandmarks(latestLandmarks);
-  if(!current) return null;
-  let best=null, bestD=Infinity;
-  for(const s of samples){
-    const d=clipDistance([current], s.frames.length ? s.frames : [s.vector]);
-    if(d<bestD){bestD=d;best=s}
-  }
-  return best ? {name:best.name, distance:bestD} : null;
-}
-
-function addMessage(type,text){
-  conversation.push({type,text,time:new Date().toISOString()});
-  if(conversation.length>60) conversation=conversation.slice(-60);
-  saveAll(); renderConversation();
-}
-
-function renderConversation(){
-  const box=$("conversation");
-  if(!conversation.length){box.innerHTML='<div class="empty-state">Your conversation will appear here.</div>';return}
-  box.innerHTML=conversation.map(m=>`<div class="message ${m.type}"><small>${m.type==="sign"?"Sign":"Speech"}</small>${escapeHtml(m.text)}</div>`).join("");
-  box.scrollTop=box.scrollHeight;
-}
-function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]))}
-
-function renderTasks(){
-  const box=$("tasksList");
-  if(!tasks.length){box.innerHTML='<div class="empty-state">No actions yet.</div>';return}
-  box.innerHTML=tasks.slice().reverse().map((t,i)=>`<div class="task ${t.done?"done":""}">
-    <div><strong>${escapeHtml(t.text)}</strong><small>${escapeHtml(t.when || "Created just now")}</small></div>
-    <button class="ghost task-done" data-id="${t.id}">${t.done?"Undo":"Done"}</button>
-  </div>`).join("");
-  box.querySelectorAll(".task-done").forEach(b=>b.onclick=()=>{const t=tasks.find(x=>x.id===b.dataset.id);if(t){t.done=!t.done;saveAll();renderTasks()}});
-}
-
-function renderTrained(){
-  $("trainedSigns").innerHTML = samples.length ? samples.reduce((acc,s)=>{
-    if(!acc.some(x=>x===s.name)) acc.push(s.name); return acc;
-  },[]).map(n=>`<span class="chip">${escapeHtml(n)}</span>`).join("") : '<span class="hint">No trained signs yet.</span>';
-}
-
-function speak(text){
-  if(!text) return;
-  if("speechSynthesis" in window){
-    speechSynthesis.cancel();
-    const u=new SpeechSynthesisUtterance(text);
-    u.rate=.95; u.pitch=1;
-    speechSynthesis.speak(u);
-  }
-}
-
-async function initModel(){
-  try{
-    statusEl.textContent="Loading AI…";
-    const vision=await FilesetResolver.forVisionTasks(WASM_URL);
-    handLandmarker=await HandLandmarker.createFromOptions(vision,{
-      baseOptions:{modelAssetPath:MODEL_URL,delegate:"GPU"},
-      runningMode:"VIDEO",numHands:1,minHandDetectionConfidence:.5,minHandPresenceConfidence:.5,minTrackingConfidence:.5
-    });
-    statusEl.textContent="AI ready";
-    statusEl.style.color="#9ee7c3";
-  }catch(e){
-    console.error(e);
-    statusEl.textContent="AI load failed";
-    statusEl.style.color="#fca5a5";
-    $("recognitionHint").textContent="Could not load the hand model. Check internet access and reload.";
-  }
-}
-
-async function stopCamera(){
-  if(rafId) cancelAnimationFrame(rafId);
-  rafId=null;
-  rafId=null;
-  if(stream){ stream.getTracks().forEach(track=>track.stop()); stream=null; }
-  video.srcObject=null;
-  latestLandmarks=null;
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  overlay.classList.remove("hidden");
-  cameraStatus.textContent="Camera off";
-  $("startCamera").textContent="▶ Start Camera";
-  $("startCamera").disabled=false;
-  $("stopCamera").disabled=true;
-  $("recognizedText").textContent="—";
-  $("recognitionHint").textContent="Camera is off.";
-}
-
-async function startCamera(){
-  if(stream) return;
-  try{
-    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"user",width:{ideal:1280},height:{ideal:720}},audio:false});
-    video.srcObject=stream; await video.play();
-    overlay.classList.add("hidden"); cameraStatus.textContent="Camera live";
-    $("startCamera").textContent="Camera Running";
-    $("startCamera").disabled=true;
-    $("stopCamera").disabled=false;
-    $("recognitionHint").textContent=samples.length ? "Show a trained sign to the camera." : "Train at least one sign below.";
-    if(rafId) cancelAnimationFrame(rafId);
-    predict();
-  }catch(e){
-    alert("Camera access failed. Use HTTPS or localhost and allow camera permission.");
-    console.error(e);
-  }
-}
-
-function predict(){
-  if(!stream){ rafId=null; return; }
-  if(!handLandmarker || video.readyState<2){rafId=requestAnimationFrame(predict);return}
-  if(video.currentTime!==lastVideoTime){
-    lastVideoTime=video.currentTime;
-    const result=handLandmarker.detectForVideo(video,performance.now());
-    ctx.clearRect(0,0,canvas.width,canvas.height);
-    canvas.width=video.videoWidth||640; canvas.height=video.videoHeight||400;
-    latestLandmarks=result.landmarks?.[0]||null;
-    if(result.landmarks?.length){
-      const drawing=new DrawingUtils(ctx);
-      drawing.drawConnectors(result.landmarks[0],HandLandmarker.HAND_CONNECTIONS,{color:"#7dd3fc",lineWidth:3});
-      drawing.drawLandmarks(result.landmarks[0],{color:"#ffffff",lineWidth:1,radius:3});
-    }
-    if(recording && latestLandmarks){
-      recordingFrames.push(normalizeLandmarks(latestLandmarks));
-      const elapsed=performance.now()-recordStarted;
-      $("trainingProgress").style.width=Math.min(100,elapsed/1500*100)+"%";
-      if(elapsed>=1500) finishRecording();
-    }
-    if(samples.length && latestLandmarks){
-      const c=classify();
-      if(c && c.distance<.17){
-        if(c.name===lastRecognized) recognitionStableCount++;
-        else {lastRecognized=c.name;recognitionStableCount=1}
-        if(recognitionStableCount>=5 && performance.now()-lastRecognizedAt>2200){
-          lastRecognizedAt=performance.now();
-          $("recognizedText").textContent=c.name;
-          $("recognitionHint").textContent="Recognized from your trained examples.";
-          addMessage("sign",c.name);
-          speak(c.name);
-        }
-      }
-    }
-  }
-  rafId=requestAnimationFrame(predict);
-}
-
-function finishRecording(){
-  recording=false;
-  $("recordSign").disabled=false; $("recordSign").textContent="● Record Sign";
-  $("trainingProgress").style.width="100%";
-  if(recordingFrames.length<5){$("trainingStatus").textContent="Not enough frames. Try again.";return}
-  pendingSample={name:$("signName").value.trim().toUpperCase(),frames:recordingFrames.filter(Boolean)};
-  if(!pendingSample.name){$("trainingStatus").textContent="Enter a sign name before recording.";pendingSample=null;return}
-  $("saveSign").disabled=false;
-  $("trainingStatus").textContent=`Captured ${pendingSample.frames.length} frames for "${pendingSample.name}". Review and save.`;
-}
-
-function startRecording(){
-  if(!stream){alert("Start the camera first.");return}
-  const name=$("signName").value.trim();
-  if(!name){alert("Enter a sign name first.");$("signName").focus();return}
-  recording=true;recordingFrames=[];recordStarted=performance.now();
-  $("recordSign").disabled=true;$("recordSign").textContent="Recording…";$("saveSign").disabled=true;
-  $("trainingStatus").textContent="Hold the same sign and keep your hand in view.";
-}
-
-function saveSample(){
-  if(!pendingSample)return;
-  samples.push({id:crypto.randomUUID(),...pendingSample,created:new Date().toISOString()});
-  saveAll(); renderTrained();
-  $("saveSign").disabled=true; pendingSample=null; $("trainingStatus").textContent="Saved. Record 3–5 examples of the same sign for better matching.";
-  $("signName").value="";
-  $("trainingProgress").style.width="0%";
-}
-
-function setupSpeech(){
-  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-  if(!SR){$("listenButton").disabled=true;$("speechStatus").textContent="Speech recognition is not supported in this browser. Try Chrome on Android/desktop.";return}
-  recognition=new SR(); recognition.lang="en-US"; recognition.interimResults=true; recognition.continuous=false;
-  recognition.onstart=()=>{listening=true;$("listenButton").textContent="⏹ Stop Listening";$("speechStatus").textContent="Listening…"};
-  recognition.onresult=e=>{
-    let finalText="";
-    for(let i=e.resultIndex;i<e.results.length;i++) if(e.results[i].isFinal) finalText+=e.results[i][0].transcript;
-    if(finalText.trim()){addMessage("speech",finalText.trim());}
-  };
-  recognition.onerror=e=>{$("speechStatus").textContent="Speech recognition error: "+e.error};
-  recognition.onend=()=>{listening=false;$("listenButton").textContent="🎤 Start Listening";if($("speechStatus").textContent==="Listening…")$("speechStatus").textContent="Ready."};
-}
-function toggleListening(){
-  if(!recognition)return;
-  if(listening) recognition.stop(); else recognition.start();
-}
-
-function createAction(){
-  const last=conversation.at(-1);
-  if(!last){alert("Have a conversation first.");return}
-  const text=last.text;
-  const lower=text.toLowerCase();
-  let when="No time extracted";
-  const timeMatch=lower.match(/\b(?:at\s*)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/);
-  if(timeMatch) when=`Time detected: ${timeMatch[1]}${timeMatch[2]?":"+timeMatch[2]:""}${timeMatch[3]?" "+timeMatch[3].toUpperCase():""}`;
-  tasks.push({id:crypto.randomUUID(),text:text.replace(/^(please\s+)?(remind me to|remember to|schedule)\s*/i,""),when,done:false});
-  saveAll();renderTasks();alert("Action created from the latest message.");
-}
-
-$("startCamera").onclick=startCamera;
-$("stopCamera").onclick=stopCamera;
-$("speakRecognized").onclick=()=>speak($("recognizedText").textContent==="—"?"":$("recognizedText").textContent);
-$("listenButton").onclick=toggleListening;
-$("clearConversation").onclick=()=>{conversation=[];saveAll();renderConversation()};
-$("addTask").onclick=createAction;
-$("openTraining").onclick=()=>{$("trainingPanel").classList.remove("hidden");renderTrained()};
-$("closeTraining").onclick=()=>$("trainingPanel").classList.add("hidden");
-$("recordSign").onclick=startRecording;
-$("saveSign").onclick=saveSample;
-window.addEventListener("resize",()=>{if(video.videoWidth){canvas.width=video.videoWidth;canvas.height=video.videoHeight}});
-window.addEventListener("beforeunload",()=>{stopCamera()});
-
-renderConversation();renderTasks();renderTrained();setupSpeech();initModel();
+import { HandLandmarker, FilesetResolver, DrawingUtils } from "@mediapipe/tasks-vision";
+const $=id=>document.getElementById(id);
+const video=$("video"),canvas=$("landmarks"),ctx=canvas.getContext("2d");
+const trainVideo=$("trainVideo"),trainCanvas=$("trainLandmarks"),trainCtx=trainCanvas.getContext("2d");
+const MODEL_URL="https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
+const WASM_URL="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22-rc.20250304/wasm";
+let stream=null,handLandmarker=null,rafId=0,lastVideoTime=-1,latestLandmarks=null;
+let recording=false,recordingFrames=[],recordStarted=0,pendingSample=null,lastRecognized="",lastRecognizedAt=0,stableCount=0,trainingSamples=[];
+let conversation=JSON.parse(localStorage.getItem("voxsign-conversation")||"[]");
+const languages={af:"Afrikaans",sq:"Albanian",am:"Amharic",ar:"Arabic",hy:"Armenian",az:"Azerbaijani",eu:"Basque",be:"Belarusian",bn:"Bengali",bs:"Bosnian",bg:"Bulgarian",ca:"Catalan",ceb:"Cebuano","zh-CN":"Chinese (Simplified)","zh-TW":"Chinese (Traditional)",co:"Corsican",hr:"Croatian",cs:"Czech",da:"Danish",nl:"Dutch",en:"English",eo:"Esperanto",et:"Estonian",fi:"Finnish",fr:"French",fy:"Frisian",gl:"Galician",ka:"Georgian",de:"German",el:"Greek",gu:"Gujarati",ht:"Haitian Creole",ha:"Hausa",he:"Hebrew",hi:"Hindi",hmn:"Hmong",hu:"Hungarian",is:"Icelandic",ig:"Igbo",id:"Indonesian",ga:"Irish",it:"Italian",ja:"Japanese",jv:"Javanese",kn:"Kannada",kk:"Kazakh",km:"Khmer",ko:"Korean",ku:"Kurdish",ky:"Kyrgyz",lo:"Lao",la:"Latin",lv:"Latvian",lt:"Lithuanian",lb:"Luxembourgish",mk:"Macedonian",mg:"Malagasy",ms:"Malay",ml:"Malayalam",mt:"Maltese",mi:"Maori",mr:"Marathi",mn:"Mongolian",my:"Myanmar",ne:"Nepali",no:"Norwegian",ny:"Nyanja",or:"Odia",ps:"Pashto",fa:"Persian",pl:"Polish",pt:"Portuguese",pa:"Punjabi",ro:"Romanian",ru:"Russian",sm:"Samoan",gd:"Scots Gaelic",sr:"Serbian",sn:"Shona",sd:"Sindhi",si:"Sinhala",sk:"Slovak",sl:"Slovenian",so:"Somali",es:"Spanish",su:"Sundanese",sw:"Swahili",sv:"Swedish",tl:"Tagalog",tg:"Tajik",ta:"Tamil",tt:"Tatar",te:"Telugu",th:"Thai",tr:"Turkish",tk:"Turkmen",uk:"Ukrainian",ur:"Urdu",ug:"Uyghur",uz:"Uzbek",vi:"Vietnamese",cy:"Welsh",xh:"Xhosa",yi:"Yiddish",yo:"Yoruba",zu:"Zulu"};
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"}[c]))}
+function saveConversation(){localStorage.setItem("voxsign-conversation",JSON.stringify(conversation))}
+function morse(t){const m={a:'.-',b:'-...',c:'-.-.',d:'-..',e:'.',f:'..-.',g:'--.',h:'....',i:'..',j:'.---',k:'-.-',l:'.-..',m:'--',n:'-.',o:'---',p:'.--.',q:'--.-',r:'.-.',s:'...',t:'-',u:'..-',v:'...-',w:'.--',x:'-..-',y:'-.--',z:'--..','1':'.----','2':'..---','3':'...--','4':'....-','5':'.....','6':'-....','7':'--...','8':'---..','9':'----.','0':'-----'};return t.toLowerCase().split('').map(c=>c===' '?'/':(m[c]||c)).join(' ')}
+function addMessage(type,text){if(!text)return;conversation.push({type,text,time:new Date().toISOString()});conversation=conversation.slice(-60);saveConversation();renderConversation();$("recognizedText").textContent=text}
+function renderConversation(){const b=$("conversation");if(!conversation.length){b.innerHTML='<div class="empty-state">Your conversation will appear here.</div>';return}b.innerHTML=conversation.map((m,i)=>`<div class="message ${m.type}"><small>${m.type==='sign'?'Sign':'Speech'}</small>${esc(m.text)}<div class="message-tools"><button class="ghost morse-btn" data-i="${i}">↗ Morse</button><button class="ghost translate-btn" data-i="${i}">🌐 Translate</button><button class="ghost speak-btn" data-i="${i}">🔊 Speak</button></div></div>`).join('');b.scrollTop=b.scrollHeight;b.querySelectorAll('.morse-btn').forEach(x=>x.onclick=()=>addMessage('speech',`Morse: ${morse(conversation[+x.dataset.i].text)}`));b.querySelectorAll('.speak-btn').forEach(x=>x.onclick=()=>speak(conversation[+x.dataset.i].text));b.querySelectorAll('.translate-btn').forEach(x=>x.onclick=()=>translateText(conversation[+x.dataset.i].text))}
+function speak(t){if(!t||t==='—')return;if('speechSynthesis'in window){speechSynthesis.cancel();speechSynthesis.speak(new SpeechSynthesisUtterance(t))}}
+function normalizeLandmarks(lm){if(!lm||lm.length<21)return null;const w=lm[0];const pts=lm.map(p=>({x:p.x-w.x,y:p.y-w.y,z:p.z-w.z}));let scale=0;for(const p of pts)scale=Math.max(scale,Math.hypot(p.x,p.y,p.z));scale=scale||1;return pts.flatMap(p=>[p.x/scale,p.y/scale,p.z/scale])}
+function distance(a,b){if(!a||!b||a.length!==b.length)return Infinity;let s=0;for(let i=0;i<a.length;i++){const d=a[i]-b[i];s+=d*d}return Math.sqrt(s/a.length)}
+function classify(){const samples=getTrained();if(!latestLandmarks||!samples.length)return null;const current=normalizeLandmarks(latestLandmarks);if(!current)return null;let best=null,bestD=Infinity;for(const s of samples){for(const frame of (s.frames||[])){const d=distance(current,frame);if(d<bestD){bestD=d;best=s}}}return best?{name:best.name,message:best.message||best.name,distance:bestD}:null}
+async function initDetector(){try{$("modelStatus").textContent="Loading AI…";const vision=await FilesetResolver.forVisionTasks(WASM_URL);handLandmarker=await HandLandmarker.createFromOptions(vision,{baseOptions:{modelAssetPath:MODEL_URL,delegate:"GPU"},runningMode:"VIDEO",numHands:1,minHandDetectionConfidence:.5,minHandPresenceConfidence:.5,minTrackingConfidence:.5});$("modelStatus").textContent="AI ready";$('detectorState').textContent='Detector ready'}catch(e){console.error(e);$("modelStatus").textContent="AI load failed";$('detectorState').textContent='Detector unavailable';$('detectorConfidence').textContent='Check your internet connection and reload.'}}
+async function startCamera(){if(stream){syncTrainingCamera();return}try{if(!handLandmarker)await initDetector();stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:1280},height:{ideal:720}},audio:false});video.srcObject=stream;await video.play();syncTrainingCamera();$("cameraOverlay").classList.add('hidden');$("cameraStatus").textContent='Camera live';$("startCamera").disabled=true;$("stopCamera").disabled=false;$("recognitionHint").textContent='Live detector is active. It matches signs you trained with camera samples.';$("detectorState").textContent='Detector live';cancelAnimationFrame(rafId);rafId=requestAnimationFrame(detectFrame)}catch(e){console.error(e);alert('Camera access failed. Use HTTPS or localhost and allow camera permission.')}}
+function syncTrainingCamera(){if(!stream||!trainVideo)return;trainVideo.srcObject=stream;trainVideo.play().catch(()=>{});$("trainCameraOverlay").classList.add('hidden');$("trainCameraStatus").textContent='Camera live';$("startTrainCamera").disabled=true;$("stopTrainCamera").disabled=false;$("recordSign").disabled=false}
+function stopCamera(){cancelAnimationFrame(rafId);if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;video.srcObject=null;trainVideo.srcObject=null;ctx.clearRect(0,0,canvas.width,canvas.height);trainCtx.clearRect(0,0,trainCanvas.width,trainCanvas.height);$("cameraOverlay").classList.remove('hidden');$("cameraStatus").textContent='Camera off';$("startCamera").disabled=false;$("stopCamera").disabled=true;$("trainCameraOverlay").classList.remove('hidden');$("trainCameraStatus").textContent='Camera off';$("startTrainCamera").disabled=false;$("stopTrainCamera").disabled=true;$("recordSign").disabled=true;$("recognitionHint").textContent='Camera is off. Start Camera to detect your trained signs.';$("detectorState").textContent='Detector idle';$("detectorValue").textContent='No sign detected';$("detectorConfidence").textContent='Start Camera to activate the live detector.';$("detectorDot").classList.remove('live');lastRecognized='';stableCount=0;recording=false}
+function detectFrame(now){if(!stream||!handLandmarker)return;rafId=requestAnimationFrame(detectFrame);if(now-lastDetect<45)return;lastDetect=now;canvas.width=video.videoWidth||640;canvas.height=video.videoHeight||400;ctx.clearRect(0,0,canvas.width,canvas.height);trainCanvas.width=video.videoWidth||640;trainCanvas.height=video.videoHeight||400;trainCtx.clearRect(0,0,trainCanvas.width,trainCanvas.height);try{const result=handLandmarker.detectForVideo(video,performance.now());latestLandmarks=result.landmarks?.[0]||null;const draw=new DrawingUtils(ctx);const trainDraw=new DrawingUtils(trainCtx);if(result.landmarks?.length){draw.drawConnectors(result.landmarks[0],HandLandmarker.HAND_CONNECTIONS,{color:'#7dd3fc',lineWidth:3});draw.drawLandmarks(result.landmarks[0],{color:'#ffffff',lineWidth:1,radius:3});trainDraw.drawConnectors(result.landmarks[0],HandLandmarker.HAND_CONNECTIONS,{color:'#7dd3fc',lineWidth:3});trainDraw.drawLandmarks(result.landmarks[0],{color:'#ffffff',lineWidth:1,radius:3});$('detectorState').textContent='Hand detected';$('detectorDot').classList.add('live');const c=classify();if(c&&c.distance<.17){if(c.name===lastRecognized)stableCount++;else{lastRecognized=c.name;stableCount=1}$("detectorValue").textContent=c.name;$("detectorConfidence").textContent=`${c.message} · ${(Math.max(0,1-c.distance)*100).toFixed(0)}% match`;$("recognizedText").textContent=c.message;if(stableCount>=5&&performance.now()-lastRecognizedAt>1800){lastRecognizedAt=performance.now();addMessage('sign',c.message);speak(c.message)}}else{$("detectorValue").textContent='Hand detected';$("detectorConfidence").textContent=c?`Move closer to your trained sign · ${(Math.max(0,1-c.distance)*100).toFixed(0)}% match`:'No trained sign match yet.'}}else{$("detectorState").textContent='Looking for a hand…';$("detectorValue").textContent='No sign detected';$("detectorConfidence").textContent='Place one hand inside the camera frame.';$("detectorDot").classList.remove('live')}}catch(e){console.error(e)}}
+let lastDetect=0;
+function getTrained(){return JSON.parse(localStorage.getItem('voxsign-trained-signs')||'[]')}
+function renderSavedTraining(){const b=$("savedTrainingGrid"),data=getTrained();if(!data.length){b.innerHTML='<div class="empty-state">No trained signs saved yet.</div>';return}b.innerHTML=data.map(x=>`<div class="saved-training-card"><strong>${esc(x.name)}</strong><small>${esc(x.message||x.name)}</small><small>${(x.frames||[]).length} captured frames</small><button class="ghost use-trained" data-message="${esc(x.message||x.name)}">Send Message</button></div>`).join('');b.querySelectorAll('.use-trained').forEach(btn=>btn.onclick=()=>{addMessage('sign',btn.dataset.message);speak(btn.dataset.message)})}
+function updateSamplePreview(){$("sampleCount").textContent=`${trainingSamples.length} captured sample${trainingSamples.length===1?'':'s'}`;$("trainingSamples").innerHTML=trainingSamples.map(src=>`<img src="${src}" alt="Camera training sample">`).join('')}
+function finishRecording(){recording=false;$("recordSign").disabled=false;$("recordSign").textContent='● Record Sign';$("trainingProgress").style.width='100%';if(recordingFrames.length<5){$("trainingStatus").textContent='Not enough frames. Try again.';return}pendingSample={name:$("trainName").value.trim().toUpperCase(),message:$("trainName").value.trim().toUpperCase(),frames:recordingFrames.filter(Boolean)};if(!pendingSample.name){$("trainingStatus").textContent='Enter a sign name before recording.';pendingSample=null;return}$("saveSign").disabled=false;$("trainingStatus").textContent=`Captured ${pendingSample.frames.length} frames for "${pendingSample.name}". Review and save.`}
+function startRecording(){if(!stream){alert('Start the camera first.');return}const name=$("trainName").value.trim();if(!name){alert('Enter a sign name first.');$("trainName").focus();return}recording=true;recordingFrames=[];recordStarted=performance.now();$("recordSign").disabled=true;$("recordSign").textContent='Recording…';$("saveSign").disabled=true;$("trainingProgress").style.width='0%';$("trainingStatus").textContent='Hold the same sign steady in front of the camera.'}
+function saveSample(){if(!pendingSample)return;const data=getTrained();data.push({id:crypto.randomUUID(),name:pendingSample.name,message:pendingSample.message,frames:pendingSample.frames,created:new Date().toISOString()});localStorage.setItem('voxsign-trained-signs',JSON.stringify(data));trainingSamples=[];pendingSample=null;updateSamplePreview();renderSavedTraining();$("saveSign").disabled=true;$("trainName").value='';$("trainingProgress").style.width='0%';$("trainingStatus").textContent='Saved. Train the same sign 3–5 times for a stronger match.'}
+function captureFrameDuringRecording(){if(!recording||!latestLandmarks)return;recordingFrames.push(normalizeLandmarks(latestLandmarks));const elapsed=performance.now()-recordStarted;$("trainingProgress").style.width=Math.min(100,elapsed/1500*100)+'%';if(elapsed>=1500)finishRecording()}
+function renderSamplePhotos(){return}
+function setupSpeech(){const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR){$("listenButton").disabled=true;$("speechStatus").textContent='Speech recognition is not supported in this browser. Try Chrome.';return}const r=new SR();r.interimResults=false;r.continuous=false;r.onstart=()=>$('speechStatus').textContent='Listening…';r.onresult=e=>{const t=e.results[0][0].transcript.trim();if(t)addMessage('speech',t)};r.onerror=e=>$('speechStatus').textContent='Speech recognition error: '+e.error;r.onend=()=>$('speechStatus').textContent='Ready.';$('listenButton').onclick=()=>{try{r.lang=localStorage.getItem('voxsign-speech-lang')||'en-US';r.start()}catch(e){}}}
+async function translateText(text){const target=$("languageSelect").value||'en';$("translateStatus").textContent='Translating…';$("translationResult").textContent='Working…';try{const url=`https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${encodeURIComponent(target)}&dt=t&q=${encodeURIComponent(text)}`;const res=await fetch(url);const data=await res.json();const translated=(data?.[0]||[]).map(x=>x?.[0]||'').join('');if(!translated)throw Error();$("translationResult").textContent=translated;$("translateStatus").textContent=`Translated to ${languages[target]||target}`}catch(e){$("translationResult").textContent='Translation unavailable. Check your internet connection.';$("translateStatus").textContent='Translation failed.'}}
+function initLanguages(){[$("languageSelect"),$("settingsLanguage")].forEach(s=>{if(!s)return;Object.entries(languages).sort((a,b)=>a[1].localeCompare(b[1])).forEach(([c,n])=>{const o=document.createElement('option');o.value=c;o.textContent=n;s.appendChild(o)});s.value=localStorage.getItem('voxsign-language')||'ta'});$("settingsLanguage").onchange=e=>{localStorage.setItem('voxsign-language',e.target.value);$("languageSelect").value=e.target.value;localStorage.setItem('voxsign-speech-lang',e.target.value==='en'?'en-US':e.target.value);$("translateStatus").textContent=`Preferred language: ${languages[e.target.value]}`}}
+function initThemes(){const saved=localStorage.getItem('voxsign-theme')||'indigo';applyTheme(saved);document.querySelectorAll('.theme-option').forEach(b=>b.onclick=()=>applyTheme(b.dataset.theme))}
+function applyTheme(t){document.body.classList.remove('theme-ocean','theme-emerald','theme-sunset','theme-midnight');if(t!=='indigo')document.body.classList.add('theme-'+t);localStorage.setItem('voxsign-theme',t);document.querySelectorAll('.theme-option').forEach(b=>b.classList.toggle('active',b.dataset.theme===t))}
+function loadProfile(){const p=JSON.parse(localStorage.getItem('voxsign-profile')||'null');if(p){$('profileName').value=p.name||'';$('profileEmail').value=p.email||'';$('profileSummary').textContent=p.name||p.email||'Manage your account details'}}
+function doLogin(name,email){localStorage.setItem('voxsign-profile',JSON.stringify({name:name||'VoxSign User',email:email||''}));$('loginScreen').classList.add('hidden');$('app').classList.remove('hidden');loadProfile()}
+function showPage(id){const panels=['trainPanel','themePanel','settingsPanel','profilePanel'];document.querySelectorAll('main > section').forEach(s=>{if(panels.includes(s.id))s.classList.add('hidden');else s.classList.toggle('hidden',id!=='home')});if(id!=='home')$(id).classList.remove('hidden');window.scrollTo({top:0,behavior:'smooth'})}
+$('topHome').onclick=()=>showPage('home');$('topProfile').onclick=()=>{loadProfile();showPage('profilePanel')};$('topSettings').onclick=()=>showPage('settingsPanel');$('openTrain').onclick=()=>{renderSavedTraining();showPage('trainPanel')};$('profileButton').onclick=()=>{loadProfile();showPage('profilePanel')};$('settingsButton').onclick=()=>showPage('settingsPanel');$('closeTrain').onclick=()=>showPage('home');$('closeThemes').onclick=()=>showPage('home');$('closeSettings').onclick=()=>showPage('home');$('closeProfile').onclick=()=>showPage('home');
+$('startTrainCamera').onclick=startCamera;$('stopTrainCamera').onclick=stopCamera;$('recordSign').onclick=startRecording;$('saveSign').onclick=saveSample;$('clearConversation').onclick=()=>{conversation=[];saveConversation();renderConversation();$('translationResult').textContent='Translation will appear here.'};$('translateLatest').onclick=()=>{const t=conversation.at(-1)?.text;if(t)translateText(t)};$('startCamera').onclick=startCamera;$('stopCamera').onclick=stopCamera;$('speakRecognized').onclick=()=>speak($('recognizedText').textContent);$('saveProfile').onclick=()=>{const name=$('profileName').value.trim(),email=$('profileEmail').value.trim();if(!name||!email){alert('Enter name and Gmail.');return}localStorage.setItem('voxsign-profile',JSON.stringify({name,email}));$('profileSummary').textContent=name;alert('Profile saved.');showPage('home')};$('prototypeLogin').onclick=()=>{const n=$('loginName').value.trim(),e=$('loginEmail').value.trim();if(!n||!e){alert('Enter your name and Gmail address.');return}doLogin(n,e)};$('googleLogin').onclick=()=>{$('loginEmail').focus();alert('Google OAuth requires your own Google OAuth Client ID. Use the prototype Gmail form for now.')};$('logout').onclick=()=>{stopCamera();$('app').classList.add('hidden');$('loginScreen').classList.remove('hidden')};
+setInterval(captureFrameDuringRecording,60);window.addEventListener('beforeunload',stopCamera);window.addEventListener('resize',()=>{if(video.videoWidth){canvas.width=video.videoWidth;canvas.height=video.videoHeight}});
+renderConversation();renderSavedTraining();setupSpeech();initThemes();initLanguages();loadProfile();showPage('home');
