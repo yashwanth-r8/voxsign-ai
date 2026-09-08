@@ -1,0 +1,9 @@
+{
+  "name":"VoxSign AI — Communication Copilot",
+  "short_name":"VoxSign AI",
+  "start_url":"./",
+  "display":"standalone",
+  "background_color":"#070b16",
+  "theme_color":"#0b1020",
+  "description":"Phone-first two-way sign and speech communication prototype."
+}

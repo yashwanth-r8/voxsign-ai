@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0b1020">
+  <title>VoxSign AI — Communication Copilot</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div>
+        <div class="brand">VoxSign <span>AI</span></div>
+        <div class="tagline">Communication Copilot</div>
+      </div>
+      <div id="modelStatus" class="status-pill">AI loading…</div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div>
+          <p class="eyebrow">ONE PHONE · TWO-WAY COMMUNICATION</p>
+          <h1>Turn signs into speech.<br>Turn speech into text.</h1>
+          <p class="sub">A phone-first accessibility and productivity assistant for real-time conversations.</p>
+        </div>
+        <button id="startCamera" class="primary big">Start Camera</button>
+      </section>
+
+      <section class="workspace">
+        <div class="camera-card card">
+          <div class="card-head">
+            <div>
+              <h2>Sign → Speech</h2>
+              <p>Show a trained sign to the camera.</p>
+            </div>
+            <span id="cameraStatus" class="mini-status">Camera off</span>
+          </div>
+          <div class="video-wrap">
+            <video id="video" playsinline muted></video>
+            <canvas id="landmarks"></canvas>
+            <div id="cameraOverlay" class="camera-overlay">
+              <div class="camera-icon">⌾</div>
+              <strong>Camera ready</strong>
+              <span>Tap Start Camera</span>
+            </div>
+          </div>
+          <div class="recognition">
+            <div class="recognition-label">Recognized sign</div>
+            <div id="recognizedText" class="recognized">—</div>
+            <div id="recognitionHint" class="hint">Train at least one sign below.</div>
+            <button id="speakRecognized" class="secondary">🔊 Speak</button>
+          </div>
+        </div>
+
+        <div class="conversation-card card">
+          <div class="card-head">
+            <div>
+              <h2>Conversation</h2>
+              <p>Keep both sides visible.</p>
+            </div>
+            <button id="clearConversation" class="ghost">Clear</button>
+          </div>
+          <div id="conversation" class="conversation">
+            <div class="empty-state">Your conversation will appear here.</div>
+          </div>
+          <div class="speech-controls">
+            <button id="listenButton" class="primary full">🎤 Start Listening</button>
+            <div id="speechStatus" class="hint">Speech recognition may use a network service in some browsers.</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="quick-actions">
+        <button id="addTask" class="action-card">
+          <span>⚡</span><div><strong>Create Action</strong><small>Turn the latest message into a task/reminder</small></div>
+        </button>
+        <button id="openTraining" class="action-card">
+          <span>✋</span><div><strong>Train a Sign</strong><small>Teach VoxSign your team's demo vocabulary</small></div>
+        </button>
+      </section>
+
+      <section class="tasks card">
+        <div class="card-head">
+          <div><h2>Actions & Reminders</h2><p>Simple productivity layer for the demo.</p></div>
+        </div>
+        <div id="tasksList" class="tasks-list">
+          <div class="empty-state">No actions yet.</div>
+        </div>
+      </section>
+
+      <section id="trainingPanel" class="card training hidden">
+        <div class="card-head">
+          <div>
+            <h2>Train a Sign</h2>
+            <p>Record about 1.5 seconds of the same sign. Repeat 3–5 times for a reliable demo.</p>
+          </div>
+          <button id="closeTraining" class="ghost">Close</button>
+        </div>
+        <div class="training-grid">
+          <label>Sign name
+            <input id="signName" placeholder="e.g. HELP">
+          </label>
+          <div class="train-buttons">
+            <button id="recordSign" class="primary">● Record Sign</button>
+            <button id="saveSign" class="secondary" disabled>Save Sample</button>
+          </div>
+        </div>
+        <div class="training-meter"><div id="trainingProgress"></div></div>
+        <div id="trainingStatus" class="hint">Start the camera, enter a sign name, then record.</div>
+        <div id="trainedSigns" class="chips"></div>
+      </section>
+    </main>
+
+    <footer>
+      <span>VoxSign AI prototype</span>
+      <span>Early demo — not a certified accessibility or medical device.</span>
+    </footer>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
