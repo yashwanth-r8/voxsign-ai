@@ -1,33 +1,179 @@
-# VoxSign AI — v6
+# VoxSign AI — v13.1
 
-A phone-first communication prototype for sign, speech, Morse, actions, and browser-to-browser calls.
+**VoxSign AI** is a phone-first communication assistant designed to help bridge communication between sign-language users and speaking users through sign detection, speech, translation, Morse code, and real-time communication features.
 
-## v6 upgrades
-- Photo-first Manual Sign Pad: tap a sign photo and send its assigned message immediately.
-- Custom hand-sign photos can be uploaded and linked to any custom message.
-- Five switchable themes: Indigo, Ocean, Emerald, Sunset, Midnight.
-- Morse Code text ↔ Morse inside Live Conversation.
-- WebRTC audio/video calling with a shareable Call ID.
-- Faster camera loop and shorter duplicate-gesture cooldown for more responsive demo recognition.
-- Help Desk and Profile remain available.
+## 🔗 Links
 
-## Sign-language accuracy note
-The app must not be presented as a verified ISL/ASL dictionary. The included photo references are illustrative/reference material and should be validated with qualified sign-language users before real-world use. Custom photos are the recommended path for the hackathon demo.
+- **GitHub Repository:** https://github.com/yashwanth-r8/voxsign-ai
+- **Live Prototype:** https://yashwanth-r8.github.io/voxsign-ai/
 
-## Browser notes
-Camera and calling require HTTPS or localhost and browser permissions. Browser SpeechRecognition support varies and may use a remote service.
+---
 
-## Attribution
-Some default reference photos are linked from Wikimedia Commons. See the individual file pages for their Creative Commons licensing and attribution requirements.
+## 🚀 Features
 
+### 📷 Sign Detector
 
-### v7 changes
-- Auto Hand Sign is OFF by default and camera access starts only after explicit confirmation.
-- Camera and Live Conversation remain side-by-side on the Home dashboard.
-- Manual Sign Pad gives instant responses without the camera.
-- Built-in sign cards use photo references where verified reference media was found; remaining cards are clearly treated as demo references.
-- Morse Code is one-way for this prototype: conversation message/text → Morse. There is no Morse → text conversion.
-- Each conversation message can be converted to Morse directly.
-- Auto recognition uses MediaPipe hand landmarks in the browser; the demo classifier is intentionally small and should not be presented as a complete ISL recognizer.
+- Real-time camera-based hand detection.
+- Displays hand landmarks over the camera feed.
+- Uses trained sign samples for prototype recognition.
+- Camera starts only when the user explicitly starts it.
+- Detection results can be sent directly to the conversation.
 
-Photo references used in the prototype include Wikimedia Commons ASL materials. These are ASL references, not ISL instruction; verify gestures with qualified/native sign-language users before real-world use.
+### 🧠 Train a Sign
+
+Users can create their own sign vocabulary.
+
+- Enter a sign name.
+- Start the training camera.
+- Record hand-sign samples.
+- Capture multiple samples for better matching.
+- Save the trained sign.
+- Trained signs can be used by the Sign Detector.
+- No image upload is required.
+
+> The training system is a prototype landmark-based recognizer and should not be presented as a complete or clinically validated sign-language recognition system.
+
+### 💬 Live Conversation
+
+The conversation panel supports:
+
+- Sign → Message
+- Speech → Text
+- Text → Speech
+- Conversation history
+- Clear conversation
+- Translate individual messages
+- Translate the latest message
+- Conversation Message → Morse Code
+
+### 🌐 Multilingual Translation
+
+VoxSign AI supports translation between multiple languages, including:
+
+- English
+- Tamil
+- Hindi
+- Telugu
+- Malayalam
+- Kannada
+- Bengali
+- Marathi
+- Urdu
+- Arabic
+- Spanish
+- French
+- German
+- Chinese
+- Japanese
+- Korean
+- Russian
+- Portuguese
+- And more
+
+The preferred language can also be selected from **Settings**.
+
+### 📡 Audio & Video Calls
+
+The prototype includes browser-based communication features:
+
+- Audio Call
+- Video Call
+- Shareable Call ID
+- Browser-to-browser communication using WebRTC
+
+### 👤 Profile
+
+Users can manage their profile information:
+
+- Name
+- Gmail address
+- Profile information
+
+### ⚙️ Settings
+
+The Settings page provides:
+
+- 🎨 Theme selection
+- 🌐 Preferred language
+- Saved user preferences
+
+### 🎨 Five Themes
+
+Choose from five interface themes:
+
+1. Indigo
+2. Ocean
+3. Emerald
+4. Sunset
+5. Midnight
+
+The selected theme is saved locally.
+
+---
+
+## 🏗️ Technology
+
+VoxSign AI is built using:
+
+- HTML5
+- CSS3
+- JavaScript
+- MediaPipe Hand Landmarker
+- WebRTC
+- Web Speech API
+- Browser LocalStorage
+- GitHub Pages
+
+---
+
+## 🔐 Login
+
+The prototype provides a Gmail/Google-style login interface.
+
+For a production deployment, real Google authentication requires OAuth configuration with an authorized Google Cloud project and domain.
+
+---
+
+## ⚠️ Sign-Language Accuracy
+
+VoxSign AI is currently a **prototype**.
+
+The sign recognition system should not be presented as a verified ISL/ASL dictionary or as a complete sign-language translator.
+
+Sign-language gestures vary by language, region, community, and context. Before real-world deployment, gesture mappings should be validated with qualified/native sign-language users.
+
+---
+
+## 🌍 Browser Requirements
+
+For camera, microphone, speech recognition, and calling:
+
+- Use HTTPS or `localhost`.
+- Allow browser camera permission.
+- Allow microphone permission when required.
+- Use a modern browser such as Chrome or Edge.
+
+Browser SpeechRecognition support and processing behavior can vary between browsers.
+
+---
+
+## 📱 Phone-First Design
+
+VoxSign AI is designed with a mobile-first approach so that the core communication experience can be demonstrated directly on a smartphone.
+
+The interface focuses on:
+
+**Camera + Conversation + Translation + Communication**
+
+---
+
+## 📂 Project Structure
+
+```text
+voxsign-ai/
+│
+├── index.html
+├── app.js
+├── styles.css
+├── manifest.json
+└── README.md
