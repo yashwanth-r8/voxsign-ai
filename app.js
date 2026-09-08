@@ -117,6 +117,7 @@ async function initModel(){
 async function stopCamera(){
   if(rafId) cancelAnimationFrame(rafId);
   rafId=null;
+  rafId=null;
   if(stream){ stream.getTracks().forEach(track=>track.stop()); stream=null; }
   video.srcObject=null;
   latestLandmarks=null;
@@ -140,6 +141,7 @@ async function startCamera(){
     $("startCamera").disabled=true;
     $("stopCamera").disabled=false;
     $("recognitionHint").textContent=samples.length ? "Show a trained sign to the camera." : "Train at least one sign below.";
+    if(rafId) cancelAnimationFrame(rafId);
     predict();
   }catch(e){
     alert("Camera access failed. Use HTTPS or localhost and allow camera permission.");
@@ -148,6 +150,7 @@ async function startCamera(){
 }
 
 function predict(){
+  if(!stream){ rafId=null; return; }
   if(!handLandmarker || video.readyState<2){rafId=requestAnimationFrame(predict);return}
   if(video.currentTime!==lastVideoTime){
     lastVideoTime=video.currentTime;
